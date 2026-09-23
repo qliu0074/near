@@ -1,0 +1,96 @@
+name: near-greenfield
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: near
+      POSTGRES_USER: near
+      POSTGRES_PASSWORD: local-development-only
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U near]
+      interval: 5s
+      retries: 15
+  redis:
+    image: redis:7.4-alpine
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redisdata:/data]
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'false'
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: [esdata:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS http://localhost:9200/_cluster/health?wait_for_status=yellow']
+      interval: 10s
+      retries: 30
+    # No host port; insecure configuration is for isolated local development only.
+  api:
+    build: ./api
+    environment: &backend
+      APP_ENV: development
+      AUTO_SCHEMA: 'false'
+      DATABASE_URL: postgresql+psycopg://near:local-development-only@postgres:5432/near
+      REDIS_URL: redis://redis:6379/0
+      ELASTICSEARCH_URL: http://elasticsearch:9200
+      WEB_ORIGIN: http://localhost:3000
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      QWEN_BASE_URL: ${QWEN_BASE_URL:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      QWEN_CHAT_MODEL: ${QWEN_CHAT_MODEL:-qwen-plus}
+      QWEN_EMBEDDING_MODEL: ${QWEN_EMBEDDING_MODEL:-text-embedding-v4}
+      EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
+      TOKEN_LIMIT: ${TOKEN_LIMIT:-100000}
+      SITE_TOKEN_LIMIT: ${SITE_TOKEN_LIMIT:-1000000}
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      EMAIL_MODE: ${EMAIL_MODE:-development}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_TLS: ${SMTP_TLS:-true}
+      PORTRAIT_API_KEY: ''
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      init-search: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health')"]
+      interval: 5s
+      retries: 20
+  migrate:
+    build: ./api
+    environment: *backend
+    command: [alembic, upgrade, head]
+    depends_on:
+      postgres: {condition: service_healthy}
+  init-search:
+    build: ./api
+    environment: *backend
+    command: [python, -m, app.worker, init-index]
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+  worker:
+    build: ./api
+    environment: *backend
+    command: [celery, -A, app.worker.celery, worker, --loglevel=info]
+    depends_on:
+      api: {condition: service_healthy}
+      redis: {condition: service_started}
+  scheduler:
+    build: ./api
+    environment: *backend
+    command: [celery, -A, app.worker.celery, beat, --loglevel=info, --schedule=/tmp/near-beat]
+    depends_on:
+      api: {condition: service_healthy}
+  web:
+    build: ./web
+    ports: ['127.0.0.1:3000:3000']
+    depends_on:
+      api: {condition: service_healthy}
+volumes:
+  pgdata:
+  redisdata:
+  esdata:

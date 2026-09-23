@@ -1,0 +1,1 @@
+"""Near Companion independent backend."""

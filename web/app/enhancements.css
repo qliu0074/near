@@ -1,0 +1,14 @@
+.choice-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0}
+.choice-bar label{font-size:11px}.choice-bar select{margin:2px 0;padding:6px;max-width:240px}
+.choice-bar button{font-size:11px;padding:7px 10px}.danger{color:#943e37}
+.usage-panel{margin-bottom:20px;max-height:340px;overflow:auto;overflow-wrap:anywhere}
+.usage-panel article{border-top:1px solid var(--line);padding:10px 0}
+.portrait p{max-height:220px;overflow:auto;overflow-wrap:anywhere}
+.app-tools{display:flex;justify-content:flex-end;align-items:center;gap:16px;padding:6px 24px;background:#eef1e9;font-size:12px;min-height:36px;flex-wrap:wrap}
+.app-tools details{position:relative}.app-tools summary{cursor:pointer;color:var(--green)}.app-tools details p{position:absolute;z-index:10;right:0;top:20px;width:min(320px,85vw);padding:18px;border:1px solid var(--line);border-radius:12px;background:#fffef9;box-shadow:0 8px 24px #293c3720}
+.connection-banner{background:#f3edcd;color:#645328;text-align:center;padding:10px 16px;font-size:13px}
+.read-status{font-size:11px;color:var(--muted);padding:4px 0}.skeleton{padding:12px 0}.skeleton span{display:block;height:16px;background:#e8eee5;border-radius:8px;margin:10px 0;max-width:90%}.skeleton span:nth-child(2){max-width:70%}.skeleton span:nth-child(3){max-width:80%}
+.create>.text{margin-left:16px}.messages{overflow-anchor:none}.choice-bar>div{font-size:11px}.status{flex-shrink:0}
+@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
+@media(max-width:1000px){.portrait{display:block}.portrait-symbol{height:65px;font-size:34px;margin-bottom:5px}.portrait h2{margin:8px 0}.portrait p{max-height:90px}.conversation{gap:12px}.chat{height:70dvh;min-height:450px}}
+@media(max-width:650px){.shell{display:block}.sidebar{width:100%;padding:12px;display:flex;flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line)}.sidebar>.eyebrow{display:none}.sidebar .brand{font-size:25px;margin-right:12px}.sidebar .account{width:100%;padding-top:6px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}.account small{flex-basis:100%}.sidebar .account button{display:inline-block;padding:4px;font-size:11px}.workspace{padding:12px}.portrait{padding:14px}.portrait-symbol{display:none}.portrait button{padding:7px}.message-actions{flex-wrap:wrap;gap:10px}.composer{grid-template-columns:minmax(0,1fr) auto}.composer button{padding:10px}.choice-bar select{max-width:200px}.chat{min-height:520px}}
