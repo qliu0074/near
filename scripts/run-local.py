@@ -42,6 +42,28 @@ def build_environment(data, provider=None, test_mode=False, environ=None, env_fi
     return env
 
 
+class browser:
+    """Run the local browser and PWA smoke checks with the active environment."""
+
+    def __init__(self, env, root, node):
+        self.env = env
+        self.root = root
+        self.node = node
+
+    def run_http_checks(self):
+        subprocess.run([sys.executable, 'tests/http_smoke.py'], cwd=self.root, env=self.env, check=True)
+
+    def run_browser_checks(self):
+        subprocess.run([self.node, 'tests/browser-smoke.cjs'], cwd=self.root, env=self.env, check=True)
+        subprocess.run([self.node, 'tests/pwa-smoke.cjs'], cwd=self.root, env=self.env, check=True)
+
+    def run(self, smoke=False, browser=False):
+        if smoke or browser:
+            self.run_http_checks()
+        if browser:
+            self.run_browser_checks()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--build', action='store_true', help='Build the web app before starting')
@@ -106,10 +128,7 @@ def main():
                 time.sleep(0.25)
             print(f'Near is ready: http://localhost:3000 ({env["AI_PROVIDER"]} AI, local email codes). Ctrl+C to stop.', flush=True)
             if args.smoke or args.browser:
-                subprocess.run([sys.executable, 'tests/http_smoke.py'], cwd=ROOT, env=env, check=True)
-                if args.browser:
-                    subprocess.run([node, 'tests/browser-smoke.cjs'], cwd=ROOT, env=env, check=True)
-                    subprocess.run([node, 'tests/pwa-smoke.cjs'], cwd=ROOT, env=env, check=True)
+                browser(env, ROOT, node).run(smoke=args.smoke, browser=args.browser)
             else:
                 while all(process.poll() is None for process in processes):
                     time.sleep(1)

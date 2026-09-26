@@ -261,3 +261,30 @@ def test_multilingual_chat_preserves_text_and_language_instruction(client, conte
     assert 'English interface and profile do not determine the reply language' in prompts[0]['content']
     stored = client.get(f'/v1/companions/{cid}/messages').json()
     assert [item['content'] for item in stored] == [content, content]
+
+
+@pytest.mark.parametrize('stream', [False, True])
+def test_chat_style_reaches_provider_and_is_budgeted(client, stream):
+    from app.providers import Reply
+    from app.prompts import CHAT_STYLE
+    login(client)
+    cid = companion(client)
+    captured = []
+    class RecordingProvider:
+        def complete(self, messages):
+            captured.extend(messages)
+            return Reply('That sounds like a long afternoon.', 20)
+        def stream(self, messages):
+            reply = self.complete(messages)
+            yield reply.text
+            yield reply
+    client.app.state.provider = RecordingProvider()
+    response = client.post(f'/v1/companions/{cid}/messages?stream={str(stream).lower()}',
+        json={'content': 'Long day today.', 'request_id': 'style-request-0001'})
+    assert response.status_code == 200
+    assert CHAT_STYLE in captured[0]['content']
+    assert captured[-1]['content'] == 'Long day today.'
+    with client.app.state.db() as db:
+        call = db.scalar(select(Call))
+        assert call.reserved == estimate_input(captured) + client.app.state.settings.max_output
+        assert call.status == 'complete'

@@ -102,6 +102,12 @@ The project uses ordinary framework dependencies, without Supabase, Cloudflare a
 
 ## Implemented behavior
 
+### Conversation style
+
+The server loads `api/app/chat_style.md` into every chat system prompt, for both streamed and non-streamed replies. This application-level conversation guide encourages specific, natural responses, fewer stock reassurances and unnecessary follow-up questions, context-aware personality, and language-appropriate phrasing. It preserves truthful AI identity and does not invent shared experiences. Edit the English guide and restart the API to change the style; the guide's language does not force English chat. Docker includes the file with the application code.
+
+The guide adds input tokens and is included in the existing reservation estimate. Mock mode still produces its fixed demo reply. Automated tests verify prompt delivery and accounting, not subjective model quality. Evaluate real Qwen replies with short venting messages, direct factual questions, corrections, multi-turn conversations, and multiple languages before judging the style. Model connectivity must work before these rules can affect replies.
+
 - Email-code registration/login, single-use codes, attempt limits, HMAC code hashes, hashed sessions, HttpOnly cookies, Origin/CSRF checks, current-device and all-device logout.
 - Real SMTP adapter and explicitly marked local test mailbox. Real email requires SMTP settings; development mode displays the code and sends no email.
 - Human/animal companions, fictional identity declaration, Qwen-reviewed original backgrounds, editable versioned profiles, optional three-topic suggestions.
