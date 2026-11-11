@@ -21,6 +21,7 @@ export function ChatPanel({companion}: {companion: Companion}) {
       {chat.choices.map(choice => <button className="secondary" disabled={busy} key={choice} onClick={() => chat.setDraft(choice)}>{choice}</button>)}
     </div>
     <form className="composer" onSubmit={event => {event.preventDefault(); void chat.send();}}>
+      {chat.generating && <button type="button" className="secondary" onClick={chat.stop}>Stop generating</button>}
       <label className="sr-only" htmlFor="message">Message</label><textarea id="message" dir="auto" disabled={busy} maxLength={2000} value={chat.draft} onChange={event => chat.setDraft(event.target.value)} placeholder="Share a little about your day…"/>
       <button disabled={disabled || !chat.draft.trim()}>Send ↑</button>
       <small>{chat.draft.length}/2000 · AI companionship does not replace real relationships or professional support</small>

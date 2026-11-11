@@ -1,6 +1,7 @@
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / '.env', override=False)
@@ -19,8 +20,13 @@ class Settings:
     embedding_dims: int = int(os.getenv('EMBEDDING_DIMS', '1024'))
     es_url: str = os.getenv('ELASTICSEARCH_URL', '')
     es_key: str = field(default=os.getenv('ELASTICSEARCH_API_KEY', ''), repr=False)
+    es_user: str = os.getenv('ELASTICSEARCH_USER', '')
+    es_password: str = field(default=os.getenv('ELASTICSEARCH_PASSWORD', ''), repr=False)
     redis_url: str = os.getenv('REDIS_URL', 'redis://localhost:6379/0')
     token_limit: int = int(os.getenv('TOKEN_LIMIT', '100000'))
+    max_concurrent_requests: int = int(os.getenv('MAX_CONCURRENT_REQUESTS', '32'))
+    stream_timeout: float = float(os.getenv('STREAM_TIMEOUT_SECONDS', '120'))
+    provider_timeout: float = float(os.getenv('PROVIDER_TIMEOUT_SECONDS', '45'))
     max_output: int = 512
     site_token_limit: int = int(os.getenv('SITE_TOKEN_LIMIT', '1000000'))
     email_mode: str = os.getenv('EMAIL_MODE', 'development')
@@ -35,12 +41,26 @@ class Settings:
     portrait_api_key: str = field(default='', repr=False)
 
     def validate(self) -> None:
+        import math
+        if self.max_concurrent_requests < 1 or any(
+            not math.isfinite(value) or value <= 0
+            for value in (self.stream_timeout, self.provider_timeout)
+        ):
+            raise RuntimeError('Concurrency and timeout settings must be finite and positive')
         if self.environment != 'development':
             if self.environment != 'production' or self.provider == 'mock' or self.email_mode != 'smtp':
                 raise RuntimeError('Production requires Qwen and real SMTP authentication')
             if self.auto_schema or not self.origin.startswith('https://') or not self.database_url.startswith('postgresql'):
                 raise RuntimeError('Production requires migrations, HTTPS and PostgreSQL')
-            if not self.smtp_tls or len(self.auth_secret) < 32 or not self.es_key:
+            origin = urlsplit(self.origin)
+            if (not origin.hostname or origin.username or origin.password or origin.query
+                    or origin.fragment or origin.path not in {'', '/'}):
+                raise RuntimeError('WEB_ORIGIN must be an HTTPS origin without a path')
+            if self.origin.endswith('/'):
+                raise RuntimeError('WEB_ORIGIN must not have a trailing slash')
+            if not self.es_url.startswith(('http://', 'https://')):
+                raise RuntimeError('Production requires an Elasticsearch endpoint')
+            if not self.smtp_tls or len(self.auth_secret) < 32 or not (self.es_key or (self.es_user and self.es_password)):
                 raise RuntimeError('Production requires TLS email, AUTH_SECRET and Elasticsearch authentication')
         if self.email_mode not in {'development', 'smtp'}:
             raise RuntimeError('Unknown EMAIL_MODE')

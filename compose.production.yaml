@@ -1,0 +1,156 @@
+name: near-production
+x-backend: &backend
+  APP_ENV: production
+  AUTO_SCHEMA: 'false'
+  WEB_ORIGIN: https://${DOMAIN:?Set DOMAIN}
+  DATABASE_URL: postgresql+psycopg://near:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/near
+  REDIS_URL: redis://redis:6379/0
+  ELASTICSEARCH_URL: http://elasticsearch:9200
+  ELASTICSEARCH_USER: elastic
+  ELASTICSEARCH_PASSWORD: ${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD}
+  AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+  AI_PROVIDER: qwen
+  QWEN_BASE_URL: ${QWEN_BASE_URL:?Set QWEN_BASE_URL}
+  QWEN_API_KEY: ${QWEN_API_KEY:?Set QWEN_API_KEY}
+  QWEN_CHAT_MODEL: ${QWEN_CHAT_MODEL:-qwen-plus}
+  QWEN_EMBEDDING_MODEL: ${QWEN_EMBEDDING_MODEL:-text-embedding-v4}
+  EMBEDDING_DIMS: ${EMBEDDING_DIMS:-1024}
+  TOKEN_LIMIT: ${TOKEN_LIMIT:-100000}
+  SITE_TOKEN_LIMIT: ${SITE_TOKEN_LIMIT:-1000000}
+  MAX_CONCURRENT_REQUESTS: ${MAX_CONCURRENT_REQUESTS:-32}
+  STREAM_TIMEOUT_SECONDS: ${STREAM_TIMEOUT_SECONDS:-120}
+  PROVIDER_TIMEOUT_SECONDS: ${PROVIDER_TIMEOUT_SECONDS:-45}
+  EMAIL_MODE: smtp
+  SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USER: ${SMTP_USER:?Set SMTP_USER}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:?Set SMTP_PASSWORD}
+  SMTP_FROM: ${SMTP_FROM:?Set SMTP_FROM}
+  SMTP_TLS: 'true'
+x-app: &app
+  build: ./api
+  environment: *backend
+  restart: unless-stopped
+  init: true
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging: &logging
+    driver: json-file
+    options: {max-size: 10m, max-file: '3'}
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: near
+      POSTGRES_USER: near
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U near -d near]
+      interval: 5s
+      retries: 30
+    logging: *logging
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, 'yes']
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      retries: 30
+    logging: *logging
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.0
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: 'true'
+      xpack.security.http.ssl.enabled: 'false'
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?Set ELASTIC_PASSWORD}
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: [esdata:/usr/share/elasticsearch/data]
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS -u "elastic:$$ELASTIC_PASSWORD" "http://localhost:9200/_cluster/health?wait_for_status=yellow" >/dev/null']
+      interval: 10s
+      retries: 30
+    logging: *logging
+  migrate:
+    <<: *app
+    restart: 'no'
+    command: [alembic, upgrade, head]
+    depends_on:
+      postgres: {condition: service_healthy}
+  init-search:
+    <<: *app
+    restart: 'no'
+    command: [python, -m, app.worker, init-index]
+    depends_on:
+      elasticsearch: {condition: service_healthy}
+  api:
+    <<: *app
+    # A dedicated ingress network prevents external clients from reaching Uvicorn.
+    # Trust forwarded headers only from Caddy's fixed address.
+    command: [uvicorn, app.main:app, --host, 0.0.0.0, --port, '8000', --proxy-headers, --forwarded-allow-ips, '172.30.91.2']
+    networks:
+      default: {}
+      ingress:
+        aliases: [near-api-ingress]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      init-search: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+  worker:
+    <<: *app
+    command: [celery, -A, app.worker.celery, worker, --loglevel=info, --concurrency=2]
+    depends_on:
+      api: {condition: service_healthy}
+  scheduler:
+    <<: *app
+    command: [celery, -A, app.worker.celery, beat, --loglevel=info, --schedule=/tmp/near-beat]
+    depends_on:
+      api: {condition: service_healthy}
+  web:
+    build: ./web
+    restart: unless-stopped
+    init: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    depends_on:
+      api: {condition: service_healthy}
+    logging: *logging
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports: ['80:80', '443:443']
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    networks:
+      default: {}
+      ingress: {ipv4_address: 172.30.91.2}
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_started}
+    logging: *logging
+networks:
+  ingress:
+    ipam:
+      config: [{subnet: 172.30.91.0/24}]
+volumes:
+  pgdata:
+  redisdata:
+  esdata:
+  caddydata:
+  caddyconfig:

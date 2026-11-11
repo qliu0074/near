@@ -10,3 +10,6 @@ __pycache__/
 test-results/
 .local/
 .npm-cache/
+
+.env.production
+backups/

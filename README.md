@@ -151,6 +151,8 @@ This creates a reconciliation record, releases the reservation and keeps the ori
 
 ## Deployment notes
 
+For public single-server Docker hosting, use the independent `compose.production.yaml` and follow [the deployment and acceptance guide](DEPLOYMENT.md). It includes HTTPS ingress, authenticated search, readiness checks and operational instructions. Do not expose the development Compose stack publicly. Container execution and real external services still require deployment-host verification.
+
 Compose is an isolated local-development configuration, including disposable database credentials and an unauthenticated internal Elasticsearch instance. Production requires HTTPS, PostgreSQL migrations, a private AUTH_SECRET of at least 32 characters, SMTP with TLS and authenticated Elasticsearch; startup validates these prerequisites.
 
 SSE must remain unbuffered and uncompressed through the reverse proxy. The Next proxy disables compression, and the API sends no-transform and X-Accel-Buffering headers. The synchronization service reads the durable event table roughly once per second per connection; Redis pub/sub fan-out is not implemented.
@@ -183,6 +185,16 @@ See VERIFICATION.md for executed checks and unverified external dependencies. Th
 
 
 ## Failure recovery
+
+### Concurrency, deadlines and cancellation
+
+`MAX_CONCURRENT_REQUESTS` (default 32) limits active HTTP requests per API process, including chat and sync streams until they close. Excess requests receive 503 with `Retry-After: 1` before authentication, database work or paid admission. `/v1/health` remains available. This is a process limit, not a shared cluster quota; multiply it by the number of API processes when planning capacity. Existing database-backed per-user paid-operation limits still apply.
+
+Qwen chat streaming uses asynchronous HTTP I/O. `STREAM_TIMEOUT_SECONDS` (default 120) bounds upstream stream generation; final database settlement is allowed to finish atomically. `PROVIDER_TIMEOUT_SECONDS` (default 45) configures chat network-operation timeouts. Prompt preparation is outside the stream deadline. Embeddings retain their existing 20-second network timeout. Synchronous database work is offloaded from the stream's event loop; non-streaming generation, retrieval and workers remain synchronous. Their running threads cannot be forcibly cancelled.
+
+The chat **Stop generating** button aborts the browser request and preserves the draft. Stream disconnection or deadline expiry closes the upstream async response and marks unfinished calls uncertain, retaining the reservation for reconciliation. Cancellation cannot guarantee the provider stopped billing. Requests are never automatically replayed. Completed settlement remains authoritative even if the client disconnects before receiving it.
+
+The normal pytest/CI suite includes a deterministic pressure test (4 occupied slots plus 200 concurrent overload requests), slot recovery after cancellation, and stream deadline/cancellation accounting checks. Run `cd api` then `../.venv/Scripts/python.exe -m pytest tests/test_concurrency.py -q` on Windows (`../.venv/bin/python` on Unix). These local tests use no paid services; they do not measure production PostgreSQL, proxy disconnect propagation or multi-replica throughput.
 
 Provider connection establishment has at most two retries; read/write timeouts and interrupted generations are never automatically replayed. Authentication/access/model-not-found/rate-limit HTTP rejections (401/403/404/429) and failures before connection establishment release the application's reservation. Other provider failures remain uncertain, including 400 inspection errors and 5xx responses. Classification follows the [Model Studio error reference](https://www.alibabacloud.com/help/en/model-studio/error-code); application token reservations are not a provider billing statement.
 

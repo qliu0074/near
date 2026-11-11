@@ -49,3 +49,14 @@ The suite covers authentication/CSRF, ownership isolation, idempotency, site bud
 Upstream Starlette/HTTPX deprecation warnings remain. No public deployment, browser visual acceptance, production load test or independent security audit has been completed.
 
 Do not describe fixture-based tests as real-service verification or an unconfigured portrait endpoint as a working image-generation integration.
+# Production deployment preparation — 2026-10-20
+
+- Added an independent production Compose stack, Caddy HTTPS/SSE ingress, authenticated Elasticsearch, private service ports, bounded container logs, startup dependencies and database readiness.
+- API trusts forwarded client addresses only from the dedicated Caddy address; ingress uses a network-specific API alias so it cannot accidentally connect through the other network.
+- Added production origin/authentication configuration regressions, Elasticsearch authentication precedence checks and readiness failure coverage. Workers now validate settings too. Interactive API documentation is disabled in production.
+- Executed locally: backend `pytest -q` **74 passed**; frontend `npm test` **9 passed**; `npm run typecheck` and `npm run build` passed.
+- Executed local `scripts/run-local.py --browser` with Edge: HTTP flow, desktop/mobile browser flow, two-device synchronization, session revocation and PWA offline checks all passed. These use SQLite, mock AI and development email.
+- Production `docker compose ... config --quiet` passed with disposable placeholder credentials. No private `.env` credentials were printed or modified.
+- Docker Engine was unreachable (`docker_engine` pipe absent); container builds, Caddy executable validation, production PostgreSQL/ES startup and external service calls were **not executed locally**. Added `.github/workflows/docker.yml` to exercise these container paths in CI; that workflow has not been run in this session.
+- Real TLS/SMTP/Qwen, target-load testing, reboot persistence, external alert delivery, vulnerability scanning and full backup restore remain deployment acceptance requirements. See `DEPLOYMENT.md`.
+- Existing test dependency deprecation warnings remain (Starlette/httpx and AnyIO); no test failures.
