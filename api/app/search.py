@@ -17,7 +17,8 @@ class Search:
 
     def request(self, method: str, path: str, body: dict | None = None) -> dict:
         headers = {'Authorization': f'ApiKey {self.settings.es_key}'} if self.settings.es_key else {}
-        with httpx.Client(timeout=5, follow_redirects=False) as client:
+        auth = (self.settings.es_user, self.settings.es_password) if not self.settings.es_key and self.settings.es_user else None
+        with httpx.Client(timeout=5, follow_redirects=False, auth=auth) as client:
             response = client.request(method, self.settings.es_url.rstrip('/') + path,
                                       headers=headers, json=body)
             response.raise_for_status()

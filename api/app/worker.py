@@ -12,6 +12,7 @@ from .search import Search
 from .failures import report
 
 settings = Settings()
+settings.validate()
 celery = Celery('near', broker=settings.redis_url)
 celery.conf.update(task_serializer='json', accept_content=['json'], result_serializer='json',
     task_acks_late=True, worker_prefetch_multiplier=1,

@@ -1,6 +1,10 @@
 import hashlib
 import hmac
 import asyncio
+import anyio
+from starlette.concurrency import run_in_threadpool, iterate_in_threadpool
+from contextlib import aclosing
+from .concurrency import ConcurrencyLimit, ClosingStreamingResponse
 import json
 import secrets
 import time
@@ -12,6 +16,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, select, update, delete, func
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 from .config import Settings
 from .models import Base, User, Session, LoginCode, Companion, Message, Memory, Call, Event, Outbox, SiteBudget, RateBucket, Operation
@@ -74,7 +79,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         yield
         engine.dispose()
 
-    app = FastAPI(title='Near Companion development API', lifespan=lifespan)
+    app = FastAPI(title='Near Companion API', lifespan=lifespan,
+                  docs_url='/docs' if settings.environment == 'development' else None,
+                  redoc_url=None, openapi_url='/openapi.json' if settings.environment == 'development' else None)
     app.state.db = factory
     app.state.provider = Provider(settings)
     app.state.settings = settings
@@ -143,6 +150,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get('/v1/health')
     def health():
         return {'status': 'ok', 'provider': settings.provider, 'development_only': settings.environment == 'development'}
+
+    @app.get('/v1/ready')
+    def ready():
+        try:
+            with factory() as db:
+                db.execute(text('SELECT 1'))
+                if db.get(SiteBudget, 1) is None:
+                    raise RuntimeError('Missing budget initialization')
+        except Exception:
+            return Response('Not ready', status_code=503)
+        return {'status': 'ready'}
 
     @app.post('/v1/auth/email/request')
     def request_code(body: EmailInput, request: Request):
@@ -336,23 +354,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     emit(db, owner, 'message.created', message.id)
 
         if stream:
-            def events():
+            async def events():
                 completed = False
                 try:
                     if memory_unavailable:
                         yield 'data: ' + json.dumps({'type': 'warning', 'message': 'Long-term memory is temporarily unavailable. This reply uses your profile and recent chat only.'}) + '\n\n'
-                    for part in app.state.provider.stream(prompt):
-                        if isinstance(part, Reply):
-                            finish(part)
-                            completed = True
-                            event = {'type': 'done', 'reply': part.text, 'replayed': False}
-                        else:
-                            event = {'type': 'delta', 'text': part}
-                        yield 'data: ' + json.dumps(event, ensure_ascii=False) + '\n\n'
+                    provider = app.state.provider
+                    source = (provider.astream(prompt) if hasattr(provider, 'astream')
+                              else iterate_in_threadpool(provider.stream(prompt)))
+                    deadline = time.monotonic() + settings.stream_timeout
+                    async with aclosing(source):
+                        while True:
+                            try:
+                                part = await asyncio.wait_for(anext(source), max(0, deadline - time.monotonic()))
+                            except StopAsyncIteration:
+                                break
+                            if isinstance(part, Reply):
+                                await run_in_threadpool(finish, part)
+                                completed = True
+                                event = {'type': 'done', 'reply': part.text, 'replayed': False}
+                            else:
+                                event = {'type': 'delta', 'text': part}
+                            yield 'data: ' + json.dumps(event, ensure_ascii=False) + '\n\n'
                     if not completed:
                         raise ValueError('Missing final usage')
                 except NotStarted as error:
-                    billing.close_failure(factory, Call, call_id, safe=True)
+                    await run_in_threadpool(billing.close_failure, factory, Call, call_id, safe=True)
                     report('chat_rejected', call_id, error)
                     yield 'data: ' + json.dumps({'type': 'error', 'safe_to_retry': True, 'message': f'{error} No usage reserved. Reference: {call_id}'}) + '\n\n'
                 except Exception as error:
@@ -360,8 +387,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     yield 'data: ' + json.dumps({'type': 'error', 'message': f'Response incomplete; budget retained for reconciliation. Reference: {call_id}'}) + '\n\n'
                 finally:
                     if not completed:
-                        uncertain()
-            return StreamingResponse(events(), media_type='text/event-stream', headers={'X-Accel-Buffering': 'no'})
+                        with anyio.CancelScope(shield=True):
+                            await run_in_threadpool(uncertain)
+            return ClosingStreamingResponse(events(), media_type='text/event-stream', headers={'X-Accel-Buffering': 'no'})
         try:
             reply = app.state.provider.complete(prompt)
             finish(reply)
@@ -490,6 +518,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     from .lifecycle import register_lifecycle
     register_lifecycle(app, factory, settings, authenticated, companion_for, emit)
+    app.add_middleware(ConcurrencyLimit, limit=settings.max_concurrent_requests)
     return app
 
 

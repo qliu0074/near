@@ -1,0 +1,49 @@
+name: Docker integration
+on: [push, pull_request]
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AI_PROVIDER: mock
+      EMAIL_MODE: development
+      DOMAIN: near.example.com
+      ACME_EMAIL: ops@example.com
+      POSTGRES_PASSWORD: ci-only-not-for-deployment
+      ELASTIC_PASSWORD: ci-only-not-for-deployment
+      AUTH_SECRET: ci-only-not-for-deployment-0123456789abcdef
+      QWEN_BASE_URL: https://example.com/v1
+      QWEN_API_KEY: ci-placeholder
+      SMTP_HOST: smtp.example.com
+      SMTP_USER: ci-placeholder
+      SMTP_PASSWORD: ci-placeholder
+      SMTP_FROM: near@example.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install httpx
+      - name: Validate production topology and ingress
+        run: |
+          docker compose --env-file .env.production.example -f compose.production.yaml config --quiet
+          docker run --rm -e DOMAIN -e ACME_EMAIL -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+      - run: sudo sysctl -w vm.max_map_count=262144
+      - name: Build and start development stack with PostgreSQL and Elasticsearch
+        run: docker compose up --build --wait --wait-timeout 240
+      - name: Exercise built frontend, auth, chat streams and persistence
+        run: python tests/http_smoke.py
+      - name: Validate production authenticated Elasticsearch startup
+        run: docker compose --env-file .env.production.example -f compose.production.yaml up --build --wait --wait-timeout 240 api worker scheduler web
+      - name: Check production readiness without provider calls
+        run: |
+          docker compose --env-file .env.production.example -f compose.production.yaml exec -T api python -c "import urllib.request; assert urllib.request.urlopen('http://localhost:8000/v1/ready').status == 200"
+      - name: Diagnostics
+        if: failure()
+        run: |
+          docker compose logs --tail 100
+          docker compose --env-file .env.production.example -f compose.production.yaml logs --tail 100
+      - name: Clean up disposable CI volumes
+        if: always()
+        run: |
+          docker compose down -v
+          docker compose --env-file .env.production.example -f compose.production.yaml down -v
