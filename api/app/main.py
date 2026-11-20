@@ -25,6 +25,7 @@ from .search import Search
 from . import billing
 from .mailer import deliver
 from .retrieval import query_embedding, rank_memories
+from .context_selection import TokenCounter, select_memories
 from .failures import NotStarted, report
 from .prompts import chat_system_prompt
 
@@ -62,6 +63,7 @@ class MemoryInput(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
     settings.validate()
+    counter = TokenCounter(settings.qwen_tokenizer_path)
     engine = create_engine(settings.database_url,
         connect_args={'check_same_thread': False} if settings.database_url.startswith('sqlite') else {},
         pool_pre_ping=True)
@@ -289,9 +291,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             history = list(db.scalars(select(Message).where(Message.companion == cid, Message.owner == owner,
                 Message.expires > time.time(), Message.archived.is_(False))
                 .order_by(Message.created.desc(), Message.id.desc()).limit(4 if body.mode == 'fast' else 12)))
+            def build_prompt(rows):
+                messages = [{'role': 'system', 'content': chat_system_prompt(
+                    companion.name, companion.profile, [m.content[:400] for m in rows])}]
+                messages.extend({'role': m.role, 'content': m.content[:600]} for m in reversed(history))
+                messages.append({'role': 'user', 'content': body.content})
+                return messages
+            base_prompt = build_prompt([])
+            if max(counter.messages(base_prompt), estimate_input(base_prompt)) + settings.max_output > 24000:
+                raise HTTPException(413, 'Context budget exceeded')
             memory_rows = []
             memory_unavailable = False
-            if settings.es_url and body.mode != 'fast':
+            if settings.es_url and body.mode != 'fast' and settings.memory_token_budget > 0:
                 try:
                     vector = query_embedding(factory, settings, app.state.provider, owner, cid, body.content, body.request_id)
                     ids = Search(settings).retrieve(owner, cid, body.content, vector)
@@ -306,11 +317,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     # ES entirely unavailable: no memory, NOT fictitious BM25 fallback.
                     memory_rows = []
                 memory_rows = rank_memories(factory, settings, app.state.provider, owner, cid,
-                    body.content, body.request_id, memory_rows)
-            prompt = [{'role': 'system', 'content': chat_system_prompt(
-                companion.name, companion.profile, [m.content[:400] for m in memory_rows])}]
-            prompt.extend({'role': m.role, 'content': m.content[:600]} for m in reversed(history))
-            prompt.append({'role': 'user', 'content': body.content})
+                    body.content, body.request_id, memory_rows, limit=False)
+            memory_rows = select_memories(memory_rows, settings, counter, base_prompt)
+            prompt = build_prompt(memory_rows)
+            # BPE counts are not additive across JSON boundaries. Recheck the
+            # actual serialized prompt AND the conservative billing estimate.
+            while memory_rows and (
+                max(counter.messages(prompt), estimate_input(prompt)) + settings.max_output > 24000
+                or counter.messages(prompt) - counter.messages(base_prompt) > settings.memory_token_budget
+            ):
+                memory_rows.pop()
+                prompt = build_prompt(memory_rows)
+            if counter.messages(prompt) + settings.max_output > 24000:
+                raise HTTPException(413, 'Context budget exceeded')
         reservation = estimate_input(prompt) + settings.max_output
         if reservation > 24000:
             raise HTTPException(413, 'Context budget exceeded')

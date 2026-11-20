@@ -16,6 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: {node-version: '22', cache: npm, cache-dependency-path: web/package-lock.json}
       - run: cd web && npm ci
+      - name: Reject high and critical dependency vulnerabilities
+        run: cd web && npm audit --audit-level=high
       - run: cd web && npm test && npm run typecheck && npm run build
   http:
     runs-on: ubuntu-latest

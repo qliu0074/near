@@ -1,5 +1,20 @@
 # Verification record
 
+## Token-budgeted context selection (2026-11-21)
+
+- Backend: 135 tests passed, including 28 context-selection cases. Coverage includes greedy versus exact 0/1 knapsack, seeded exhaustive optimality comparisons, item-count and token constraints, deterministic ties, no candidate reuse, Unicode/JSON counts, local tokenizer loading with padding/truncation disabled, zero-budget retrieval bypass, and selected memories in both normal and SSE prompts. One existing AnyIO deprecation warning remains. After the final nested-JSON cost adjustment, all 28 context tests passed again.
+- Live Qwen: DP and greedy each selected a short relevant database memory while excluding an oversized higher-ranked candidate. Each request settled 594 tokens with zero remaining reservation. These used fixed synthetic database candidates instead of live Elasticsearch and the conservative default counter, not a model-matched tokenizer. No recall/quality benchmark or exact provider-token-count claim is made.
+- Linux API Docker image built successfully with tokenizers 0.23.3. Development and production Compose configuration checks passed. Local tokenizer vocabulary counting was tested with a deterministic fixture; deploying an actual matching Qwen tokenizer.json requires an explicit local path/read-only mount.
+- Defaults: CONTEXT_SELECTION=dp, MEMORY_TOKEN_BUDGET=2048. No database migration, frontend change, or private environment-file edit was required. Earlier frontend security updates remain in the working tree.
+
+## Frontend dependency security update (2026-11-21)
+
+- Updated Next.js from 16.3.4 to 16.4.6, sharp from 0.35.4 to 0.35.5, and source-map-js from 1.2.1 to 1.2.4. The transitive dependencies are pinned by package-lock.json; no forced overrides or application behavior changes were needed.
+- npm audit reported zero known vulnerabilities after updating. Linux Docker npm ci also reported zero vulnerabilities. This covers npm's advisory database at verification time, not a full security audit.
+- Frontend: all 9 tests, TypeScript checks, and the production build passed. HTTP smoke, Edge desktop/mobile, cross-device synchronization, session revocation and PWA offline checks passed using mock AI and temporary SQLite.
+- The Linux Node 22 Docker frontend image built successfully. A temporary container loaded sharp 0.35.5 and converted a synthetic SVG to PNG successfully.
+- Added npm audit --audit-level=high to the web CI job to reject high/critical dependency advisories. Remote CI has not been run for this change. Existing deployments must rebuild and replace the web container; rebuilding a local test image does not update a running deployment.
+
 ## Hybrid retrieval and reranking (2026-11-20)
 
 - Backend: 107 tests passed, including 26 new retrieval/rerank checks. After the final score-validation guard, all 26 retrieval tests passed again. Coverage includes independent search-branch failure, candidate limits, ID/excerpt deduplication, authorization before provider calls, native DashScope payloads, partial/tied/invalid rankings, safe rejection fallback, uncertain usage retention, cached billing and fast-mode bypass. Two existing dependency deprecation warnings remain.

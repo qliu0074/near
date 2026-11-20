@@ -19,7 +19,7 @@ def query_embedding(factory, settings, provider, owner, companion, text, request
     return embedding(factory, settings, provider, owner, companion, text, 'query:' + request_id)
 
 
-def rank_memories(factory, settings, provider, owner, companion, query, request_id, memories):
+def rank_memories(factory, settings, provider, owner, companion, query, request_id, memories, *, limit=True):
     """Rerank only database-authorized rows, preserving RRF order on safe failure."""
     unique, seen_ids, seen_text = [], set(), set()
     for memory in memories:
@@ -30,7 +30,7 @@ def rank_memories(factory, settings, provider, owner, companion, query, request_
         seen_ids.add(memory.id)
         seen_text.add(normalized)
         unique.append(memory)
-    fallback = unique[:settings.memory_limit]
+    fallback = unique[:settings.memory_limit] if limit else unique
     if not settings.rerank_enabled or settings.provider != 'qwen' or len(unique) < 2:
         return fallback
     # Conservative byte bounds also cover gte-rerank-v2's 30k request limit.
@@ -76,7 +76,7 @@ def rank_memories(factory, settings, provider, owner, companion, query, request_
         ranked = [candidates[i] for i in sorted(scores, key=lambda i: (-scores[i], i))]
         ranked_ids = {m.id for m in ranked}
         ranked.extend(m for m in unique if m.id not in ranked_ids)
-        return ranked[:settings.memory_limit]
+        return ranked[:settings.memory_limit] if limit else ranked
     except (KeyError, TypeError, ValueError) as error:
         report('rerank_invalid', request_id, error)
         return fallback

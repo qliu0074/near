@@ -23,6 +23,9 @@ class Settings:
     knn_num_candidates: int = int(os.getenv('KNN_NUM_CANDIDATES', '100'))
     fusion_candidates: int = int(os.getenv('FUSION_CANDIDATES', '40'))
     memory_limit: int = int(os.getenv('MEMORY_LIMIT', '5'))
+    context_selection: str = os.getenv('CONTEXT_SELECTION', 'dp')
+    memory_token_budget: int = int(os.getenv('MEMORY_TOKEN_BUDGET', '2048'))
+    qwen_tokenizer_path: str = os.getenv('QWEN_TOKENIZER_PATH', '')
     rerank_enabled: bool = os.getenv('RERANK_ENABLED', 'false').lower() == 'true'
     rerank_url: str = os.getenv('RERANK_URL', '')
     rerank_key: str = field(default=os.getenv('RERANK_API_KEY', ''), repr=False)
@@ -53,6 +56,8 @@ class Settings:
 
     def validate(self) -> None:
         import math
+        if self.context_selection not in {'dp', 'greedy'} or not 0 <= self.memory_token_budget <= 8192:
+            raise RuntimeError('CONTEXT_SELECTION must be dp or greedy; MEMORY_TOKEN_BUDGET must be 0..8192')
         if any(not 1 <= value <= 500 for value in (
             self.bm25_candidates, self.knn_candidates, self.fusion_candidates, self.rerank_candidates
         )) or not self.knn_candidates <= self.knn_num_candidates <= 10000:
