@@ -18,6 +18,17 @@ class Settings:
     chat_model: str = os.getenv('QWEN_CHAT_MODEL', 'qwen-plus')
     embedding_model: str = os.getenv('QWEN_EMBEDDING_MODEL', 'text-embedding-v4')
     embedding_dims: int = int(os.getenv('EMBEDDING_DIMS', '1024'))
+    bm25_candidates: int = int(os.getenv('BM25_CANDIDATES', '20'))
+    knn_candidates: int = int(os.getenv('KNN_CANDIDATES', '20'))
+    knn_num_candidates: int = int(os.getenv('KNN_NUM_CANDIDATES', '100'))
+    fusion_candidates: int = int(os.getenv('FUSION_CANDIDATES', '40'))
+    memory_limit: int = int(os.getenv('MEMORY_LIMIT', '5'))
+    rerank_enabled: bool = os.getenv('RERANK_ENABLED', 'false').lower() == 'true'
+    rerank_url: str = os.getenv('RERANK_URL', '')
+    rerank_key: str = field(default=os.getenv('RERANK_API_KEY', ''), repr=False)
+    rerank_model: str = os.getenv('RERANK_MODEL', 'gte-rerank-v2')
+    rerank_candidates: int = int(os.getenv('RERANK_CANDIDATES', '20'))
+    rerank_timeout: float = float(os.getenv('RERANK_TIMEOUT_SECONDS', '10'))
     es_url: str = os.getenv('ELASTICSEARCH_URL', '')
     es_key: str = field(default=os.getenv('ELASTICSEARCH_API_KEY', ''), repr=False)
     es_user: str = os.getenv('ELASTICSEARCH_USER', '')
@@ -42,6 +53,21 @@ class Settings:
 
     def validate(self) -> None:
         import math
+        if any(not 1 <= value <= 500 for value in (
+            self.bm25_candidates, self.knn_candidates, self.fusion_candidates, self.rerank_candidates
+        )) or not self.knn_candidates <= self.knn_num_candidates <= 10000:
+            raise RuntimeError('Invalid retrieval candidate limits')
+        if not 1 <= self.memory_limit <= 10 or self.memory_limit > self.fusion_candidates:
+            raise RuntimeError('MEMORY_LIMIT must be between 1 and 10 and within FUSION_CANDIDATES')
+        if self.rerank_candidates > self.fusion_candidates or not math.isfinite(self.rerank_timeout) or self.rerank_timeout <= 0:
+            raise RuntimeError('Invalid rerank candidate limit or timeout')
+        if self.rerank_enabled:
+            endpoint = urlsplit(self.rerank_url)
+            if (endpoint.scheme != 'https' or not endpoint.hostname or endpoint.username or endpoint.password
+                    or endpoint.query or endpoint.fragment or '{' in self.rerank_url or '}' in self.rerank_url
+                    or not endpoint.path.endswith('/api/v1/services/rerank/text-rerank/text-rerank')
+                    or not self.rerank_model.strip() or not (self.rerank_key or self.qwen_key)):
+                raise RuntimeError('Rerank requires a full HTTPS DashScope endpoint, model and server-side key')
         if self.max_concurrent_requests < 1 or any(
             not math.isfinite(value) or value <= 0
             for value in (self.stream_timeout, self.provider_timeout)

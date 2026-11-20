@@ -1,5 +1,13 @@
 # Verification record
 
+## Hybrid retrieval and reranking (2026-11-20)
+
+- Backend: 107 tests passed, including 26 new retrieval/rerank checks. After the final score-validation guard, all 26 retrieval tests passed again. Coverage includes independent search-branch failure, candidate limits, ID/excerpt deduplication, authorization before provider calls, native DashScope payloads, partial/tied/invalid rankings, safe rejection fallback, uncertain usage retention, cached billing and fast-mode bypass. Two existing dependency deprecation warnings remain.
+- Development and production Compose configuration validation passed, including production rerank settings with disposable placeholder deployment credentials.
+- Rebuilt the isolated Docker stack with real PostgreSQL, Redis/Celery, Elasticsearch and Qwen. Three indexed synthetic memories included a duplicate excerpt; the application sent only two unique excerpts to reranking. Real normal-mode SSE chat completed and replay did not increase usage. The integration used 682 tokens, including 58 rerank tokens. Containers were stopped afterward; test volumes were retained.
+- A separate live qwen3-rerank adapter/metering check ranked the relevant document first and settled 52 tokens. The Singapore account was used with an explicit in-memory model/endpoint override; private `.env` files were not changed. gte-rerank-v2 is covered by protocol fixtures, not a live Beijing-account call. No retrieval-quality benchmark or relevance improvement claim is made from these connectivity checks.
+- Reranking remains opt-in. No database migration or frontend change is required.
+
 ## Failure recovery (2026-09-22)
 
 - Backend: 54 tests passed; after adding the paused-job recovery command, all 15 failure-specific tests passed again. Coverage includes rejected requests releasing reservations once, recovery on subsequent requests, metered job retry, uncertain partial streams, sanitized logs, search degradation, and bounded outbox retries/resumption.

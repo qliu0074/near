@@ -24,7 +24,7 @@ from .providers import Provider, Reply, estimate_input
 from .search import Search
 from . import billing
 from .mailer import deliver
-from .retrieval import query_embedding
+from .retrieval import query_embedding, rank_memories
 from .failures import NotStarted, report
 from .prompts import chat_system_prompt
 
@@ -305,8 +305,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     report('memory_unavailable', body.request_id, error)
                     # ES entirely unavailable: no memory, NOT fictitious BM25 fallback.
                     memory_rows = []
+                memory_rows = rank_memories(factory, settings, app.state.provider, owner, cid,
+                    body.content, body.request_id, memory_rows)
             prompt = [{'role': 'system', 'content': chat_system_prompt(
-                companion.name, companion.profile, [m.content[:400] for m in memory_rows[:5]])}]
+                companion.name, companion.profile, [m.content[:400] for m in memory_rows])}]
             prompt.extend({'role': m.role, 'content': m.content[:600]} for m in reversed(history))
             prompt.append({'role': 'user', 'content': body.content})
         reservation = estimate_input(prompt) + settings.max_output

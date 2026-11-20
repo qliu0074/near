@@ -1,4 +1,4 @@
-"""Atomic reservations shared by chat, embeddings, profile generation and story choices."""
+"""Atomic reservations shared by chat, embeddings, reranking, profiles and story choices."""
 import hashlib
 import json
 from fastapi import HTTPException

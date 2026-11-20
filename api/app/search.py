@@ -1,6 +1,7 @@
 from collections import defaultdict
 import httpx
 from .config import Settings
+from .failures import report
 
 
 def rrf(*rankings: list[str], limit: int = 5) -> list[str]:
@@ -43,20 +44,28 @@ class Search:
     def retrieve(self, owner: str, companion: str, query: str, vector: list[float] | None) -> list[str]:
         filters = [{'term': {'owner': owner}}, {'term': {'companion': companion}},
                    {'term': {'deleted': False}}]
-        lexical = self.request('POST', '/near-memories-v1/_search', {
-            'size': 20, '_source': False,
-            'query': {'bool': {'filter': filters, 'must': [{'match': {'content': query}}]}}})
-        first = [hit['_id'] for hit in lexical['hits']['hits']]
-        if vector is None:
-            return first[:5]
-        try:
-            semantic = self.request('POST', '/near-memories-v1/_search', {
-                'size': 20, '_source': False, 'knn': {'field': 'embedding', 'query_vector': vector,
-                'k': 20, 'num_candidates': 100, 'filter': {'bool': {'filter': filters + [
-                    {'term': {'embedding_model': self.settings.embedding_model}}]}}}})
-        except httpx.HTTPError:
-            return first[:5]
-        return rrf(first, [hit['_id'] for hit in semantic['hits']['hits']])
+        branches = [{'size': self.settings.bm25_candidates, '_source': False,
+            'query': {'bool': {'filter': filters, 'must': [{'match': {'content': query}}]}}}]
+        if vector is not None:
+            branches.append({'size': self.settings.knn_candidates, '_source': False,
+                'knn': {'field': 'embedding', 'query_vector': vector,
+                    'k': self.settings.knn_candidates, 'num_candidates': self.settings.knn_num_candidates,
+                    'filter': {'bool': {'filter': filters + [
+                        {'term': {'embedding_model': self.settings.embedding_model}}]}}}})
+        rankings, errors = [], []
+        for branch in branches:
+            try:
+                result = self.request('POST', '/near-memories-v1/_search', branch)
+                ids = [hit['_id'] for hit in result['hits']['hits']]
+                if any(not isinstance(item, str) for item in ids):
+                    raise ValueError('Invalid search document ID')
+                rankings.append(ids)
+            except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
+                errors.append(error)
+                report('knn_unavailable' if 'knn' in branch else 'bm25_unavailable', companion, error)
+        if not rankings:
+            raise errors[0]
+        return rrf(*rankings, limit=self.settings.fusion_candidates)
 
     def index(self, memory_id: str, document: dict, version: int) -> None:
         try:

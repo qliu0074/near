@@ -23,6 +23,23 @@ class Provider:
     def __init__(self, settings: Settings):
         self.settings = settings
 
+    def rerank_with_usage(self, query: str, documents: list[str]) -> tuple[dict | None, int]:
+        # Use DashScope's native endpoint: gte-rerank-v2 is not OpenAI-compatible.
+        with provider_client(self.settings.rerank_timeout) as client:
+            response = client.post(self.settings.rerank_url,
+                headers={'Authorization': 'Bearer ' + (self.settings.rerank_key or self.settings.qwen_key)},
+                json={'model': self.settings.rerank_model,
+                    'input': {'query': query, 'documents': documents},
+                    'parameters': {'top_n': len(documents), 'return_documents': False}})
+            response.raise_for_status()
+            body = response.json()
+        usage = body['usage']['total_tokens']
+        if type(usage) is not int or usage < 0:
+            raise ValueError('Invalid rerank usage')
+        # Validate ranking AFTER metering, so malformed output with known usage
+        # can safely fall back without losing the provider charge.
+        return body.get('output'), usage
+
     def complete(self, messages: list[dict[str, str]]) -> Reply:
         if self.settings.provider == 'mock':
             text = '[Local demo] I am here to listen. Would you like to share a little more about your day?'
