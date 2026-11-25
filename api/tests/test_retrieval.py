@@ -201,7 +201,9 @@ def test_chat_authorizes_before_rerank_and_fast_mode_skips_it(client, monkeypatc
         def complete(self, messages):
             prompts.append(messages)
             return Reply('ok', 4)
+    # The provider is stubbed below; keep validation independent of local .env credentials.
     settings = replace(client.app.state.settings, provider='qwen', rerank_enabled=True,
+                       qwen_url='https://qwen.invalid/v1', qwen_key='test-key',
                        rerank_url=ENDPOINT, rerank_key='key', es_url='http://search.invalid', memory_limit=1)
     app = create_app(settings); app.state.provider = RealProvider()
     with TestClient(app, headers=dict(client.headers), cookies=client.cookies) as second:
